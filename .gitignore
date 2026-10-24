@@ -1,0 +1,15 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+*.iml
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+# Never place commercial game images or extracted assets in this repository.
+*.iso
+*.chd
+*.bin
+*.cue
+SCUS_971.01
