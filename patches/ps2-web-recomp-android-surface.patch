@@ -1,0 +1,60 @@
+diff --git a/runtime/include/ps2/system.hpp b/runtime/include/ps2/system.hpp
+--- a/runtime/include/ps2/system.hpp
++++ b/runtime/include/ps2/system.hpp
+@@ -94,6 +94,6 @@ bool display_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::
+ 
+ struct WindowTarget {
+-    enum Kind { X11, Wayland, Canvas } kind = X11;
++    enum Kind { X11, Wayland, Canvas, Android } kind = X11;
+     void *display = nullptr;
+     std::uint64_t window = 0;
+     void *surface = nullptr;
+diff --git a/runtime/src/gs/gpu/gpu.hpp b/runtime/src/gs/gpu/gpu.hpp
+--- a/runtime/src/gs/gpu/gpu.hpp
++++ b/runtime/src/gs/gpu/gpu.hpp
+@@ -17,7 +17,7 @@ struct DisplaySource {
+ };
+ 
+ struct SurfaceTarget {
+-    enum Kind { X11, Wayland, Canvas } kind;
++    enum Kind { X11, Wayland, Canvas, Android } kind;
+     void *display;
+     std::uint64_t window;
+     void *surface;
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -1641,10 +1641,15 @@ bool attach_surface(const SurfaceTarget &target) {
+ #else
+     WGPUSurfaceSourceXlibWindow xlib = WGPU_SURFACE_SOURCE_XLIB_WINDOW_INIT;
+     WGPUSurfaceSourceWaylandSurface wayland = WGPU_SURFACE_SOURCE_WAYLAND_SURFACE_INIT;
+-    if (target.kind == SurfaceTarget::X11) {
++    WGPUSurfaceSourceAndroidNativeWindow android{};
++    android.chain.sType = WGPUSType_SurfaceSourceAndroidNativeWindow;
++    if (target.kind == SurfaceTarget::Android) {
++        android.window = reinterpret_cast<void *>(static_cast<std::uintptr_t>(target.window));
++        sd.nextInChain = &android.chain;
++    } else if (target.kind == SurfaceTarget::X11) {
+         xlib.display = target.display;
+         xlib.window = target.window;
+         sd.nextInChain = &xlib.chain;
+     } else if (target.kind == SurfaceTarget::Wayland) {
+         wayland.display = target.display;
+         wayland.surface = target.surface;
+diff --git a/host/window.cpp b/host/window.cpp
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -64,7 +64,13 @@ bool attach_gpu() {
+         target.surface = info.info.wl.surface;
+         break;
+ #endif
++#if defined(SDL_VIDEO_DRIVER_ANDROID)
++    case SDL_SYSWM_ANDROID:
++        target.kind = ps2::WindowTarget::Android;
++        target.window = reinterpret_cast<std::uintptr_t>(info.info.android.window);
++        break;
++#endif
+     default: return false;
+     }
+     return ps2::attach_window(target);
+ }
