@@ -1,4 +1,5 @@
 #include "iso9660.h"
+#include "ps2_elf.h"
 
 #include <algorithm>
 #include <array>
@@ -128,16 +129,18 @@ IsoInspection inspect_iso_fd(int fd) {
                             result.target_file_found = true;
                             result.file_lba = lba;
                             result.file_size = bytes;
-                            std::array<std::uint8_t, 4> signature{};
-                            result.elf_magic_found = bytes >= signature.size() &&
-                                read_exact_at(fd, signature.data(), signature.size(),
-                                              static_cast<off_t>(static_cast<std::uint64_t>(lba) * kSectorSize)) &&
-                                signature[0] == 0x7f && signature[1] == 'E' &&
-                                signature[2] == 'L' && signature[3] == 'F';
-                            if (result.elf_magic_found) {
-                                result.message = "Found SCUS_971.01 with an ELF header. ISO inspection passed. This lab still cannot run the original game yet.";
+                            const auto elf = inspect_ps2_elf_fd(
+                                fd, static_cast<std::uint64_t>(lba) * kSectorSize, bytes);
+                            result.elf_magic_found = elf.signature_found;
+                            result.ps2_elf_valid = elf.valid;
+                            result.elf_entry_address = elf.entry_address;
+                            result.load_segment_count = elf.load_segment_count;
+                            result.load_file_bytes = elf.load_file_bytes;
+                            result.load_memory_bytes = elf.load_memory_bytes;
+                            if (elf.valid) {
+                                result.message = "Found SCUS_971.01. " + elf.message;
                             } else {
-                                result.message = "Found SCUS_971.01, but its contents do not start with a valid ELF signature.";
+                                result.message = "Found SCUS_971.01, but PS2 ELF validation failed: " + elf.message;
                             }
                             return result;
                         }

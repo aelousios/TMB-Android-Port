@@ -1,4 +1,5 @@
 #include "iso9660.h"
+#include "ps2_elf.h"
 
 #include <array>
 #include <cassert>
@@ -11,6 +12,12 @@
 
 namespace {
 constexpr std::size_t kSector = 2048;
+void put16(std::uint8_t* p, std::uint16_t v) { p[0] = static_cast<std::uint8_t>(v); p[1] = static_cast<std::uint8_t>(v >> 8); }
+void put32(std::uint8_t* p, std::uint32_t v) { p[0] = static_cast<std::uint8_t>(v); p[1] = static_cast<std::uint8_t>(v >> 8); p[2] = static_cast<std::uint8_t>(v >> 16); p[3] = static_cast<std::uint8_t>(v >> 24); }
+void makeLoad(std::uint8_t* p, std::uint32_t offset, std::uint32_t address, std::uint32_t fileSize, std::uint32_t memSize, std::uint32_t flags) {
+    put32(p, 1); put32(p + 4, offset); put32(p + 8, address); put32(p + 12, address);
+    put32(p + 16, fileSize); put32(p + 20, memSize); put32(p + 24, flags); put32(p + 28, 16);
+}
 void put32Both(std::uint8_t* p, std::uint32_t value) {
     p[0] = static_cast<std::uint8_t>(value);
     p[1] = static_cast<std::uint8_t>(value >> 8);
@@ -44,11 +51,15 @@ std::vector<std::uint8_t> validImage() {
     offset += addRecord(dir + offset, 20, kSector, true, {0});
     offset += addRecord(dir + offset, 20, kSector, true, {1});
     const std::string target = "SCUS_971.01;1";
-    addRecord(dir + offset, 21, 16, false, std::vector<std::uint8_t>(target.begin(), target.end()));
-    image[kSector * 21 + 0] = 0x7f;
-    image[kSector * 21 + 1] = 'E';
-    image[kSector * 21 + 2] = 'L';
-    image[kSector * 21 + 3] = 'F';
+    addRecord(dir + offset, 21, 256, false, std::vector<std::uint8_t>(target.begin(), target.end()));
+    auto* elf = image.data() + kSector * 21;
+    elf[0] = 0x7f; elf[1] = 'E'; elf[2] = 'L'; elf[3] = 'F';
+    elf[4] = 1; elf[5] = 1; elf[6] = 1;
+    put16(elf + 16, 2); put16(elf + 18, 8); put32(elf + 20, 1);
+    put32(elf + 24, 0x00100000); put32(elf + 28, 52);
+    put16(elf + 40, 52); put16(elf + 42, 32); put16(elf + 44, 2);
+    makeLoad(elf + 52, 0x80, 0x00100000, 32, 32, 5);
+    makeLoad(elf + 84, 0xa0, 0x00100100, 16, 64, 6);
     return image;
 }
 int fdFrom(const std::vector<std::uint8_t>& bytes) {
@@ -72,7 +83,10 @@ int main() {
     assert(result.target_file_found);
     assert(result.elf_magic_found);
     assert(result.file_lba == 21);
-    assert(result.file_size == 16);
+    assert(result.file_size == 256);
+    assert(result.ps2_elf_valid);
+    assert(result.elf_entry_address == 0x00100000);
+    assert(result.load_segment_count == 2);
 
     auto invalid = validImage();
     invalid[kSector * 16 + 1] = 'X';
