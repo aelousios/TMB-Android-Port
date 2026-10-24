@@ -77,7 +77,7 @@ class MainActivity : Activity() {
         isoStatus = TextView(this).apply {
             text = "Select US NTSC-U ISO to inspect • no game boot yet"
             maxWidth = dp(380)
-            maxLines = 4
+            maxLines = 7
             setTextColor(Color.rgb(210, 218, 224))
             textSize = 11f
             typeface = Typeface.MONOSPACE

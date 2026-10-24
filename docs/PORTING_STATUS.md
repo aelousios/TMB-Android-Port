@@ -4,11 +4,17 @@
 
 The application package has a Kotlin/Android lifecycle shell and an NDK C++ shared library. The C++ renderer runs through OpenGL ES 2.0. The current arena geometry, target movement, hit detection and car handling are newly written test behavior. They are intentionally not represented as original game behavior.
 
-The ISO inspector reads an already-open file descriptor without changing the selected file. It checks for an ISO-9660 primary volume descriptor at sector 16, walks directory records with depth and entry limits, locates `SCUS_971.01`, and validates its ELF32/little-endian/MIPS header and program-header table. It bounds-checks each PT_LOAD segment, totals file-backed and in-memory bytes, and verifies that the entry point is covered by a loadable segment. This is metadata inspection only: it does not extract, map, patch or execute the MIPS code.
+The ISO inspector reads the user-selected image without changing it. It locates `SCUS_971.01`, validates the ELF32/little-endian/MIPS header and program-header table, then copies its PT_LOAD segments into a modeled 32 MiB EE main-RAM image plus 16 KiB scratchpad. It bounds-checks ranges, zero-fills BSS, supports low addresses and common KSEG0/KSEG1 RAM aliases, and retains the staged image in native memory. It does not patch the ISO or execute MIPS instructions.
 
 ## Next completed engineering step: executable metadata validation
 
 The app now distinguishes “the filename exists and begins with ELF” from a structurally plausible PS2 MIPS ELF executable. `ps2_elf.cpp` validates class, endianness, type, machine, header dimensions, the program-header table, PT_LOAD file/memory ranges, alignment and entry-point coverage. Tests use a small synthetic ELF and do not contain any commercial game data. This gives future loader work reliable executable metadata; it is not a CPU or PS2 runtime.
+
+## Next completed milestone: PS2 EE guest-memory staging
+
+`ps2_memory.cpp` builds on ELF metadata validation. It loads non-empty `PT_LOAD` segments into a 32 MiB guest main-RAM model, supports low physical addresses and KSEG0/KSEG1 aliases, models the 16 KiB EE scratchpad, and zero-fills BSS. The Android ISO picker now stages validated executable segments into a retained guest-memory object. This code still does not execute a single MIPS instruction.
+
+The staged memory image is a building block for a future native-source runtime or a separately designed instruction translator. It does not provide a CPU, GPU/GS, VU microcode, DMA, IOP/SPU2, sound, or system services.
 
 ## Why this does not yet run Twisted Metal: Black
 

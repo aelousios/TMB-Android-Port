@@ -7,11 +7,14 @@
 #include <cmath>
 #include <cstdint>
 #include <mutex>
+#include <memory>
+#include <utility>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "iso9660.h"
+#include "ps2_memory.h"
 
 namespace {
 constexpr const char* kLogTag = "TMBNativePortLab";
@@ -42,6 +45,8 @@ struct State {
 
 std::mutex gMutex;
 State gState;
+std::mutex gPreparedMemoryMutex;
+std::unique_ptr<tmbport::Ps2EeMemory> gPreparedMemory;
 int gWidth = 1;
 int gHeight = 1;
 GLuint gProgram = 0;
@@ -415,7 +420,33 @@ Java_dev_tmb_nativeport_NativeBridge_getHudText(JNIEnv* env, jobject) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_dev_tmb_nativeport_NativeBridge_inspectIsoFd(JNIEnv* env, jobject, jint fd) {
     const auto result = tmbport::inspect_iso_fd(static_cast<int>(fd));
-    const std::string message = result.message;
+    std::string message = result.message;
+
+    // The selected ISO remains read-only. On successful ELF validation, stage
+    // PT_LOAD data into a retained guest EE memory model for later runtime work.
+    if (result.target_file_found && result.ps2_elf_valid) {
+        auto candidate = std::make_unique<tmbport::Ps2EeMemory>();
+        const std::uint64_t elfOffset = static_cast<std::uint64_t>(result.file_lba) * 2048U;
+        const auto staged = tmbport::load_ps2_elf_into_ee_memory(
+            static_cast<int>(fd), elfOffset, result.file_size, *candidate);
+        if (staged.loaded) {
+            {
+                std::lock_guard<std::mutex> lock(gPreparedMemoryMutex);
+                gPreparedMemory = std::move(candidate);
+            }
+            message += "\n\nGuest RAM staging passed: " + staged.message;
+        } else {
+            {
+                std::lock_guard<std::mutex> lock(gPreparedMemoryMutex);
+                gPreparedMemory.reset();
+            }
+            message += "\n\nGuest RAM staging failed: " + staged.message;
+        }
+    } else {
+        std::lock_guard<std::mutex> lock(gPreparedMemoryMutex);
+        gPreparedMemory.reset();
+    }
+
     __android_log_print(ANDROID_LOG_INFO, kLogTag,
                         "ISO inspection: valid=%d ELF=%d size=%u",
                         result.valid_iso9660 ? 1 : 0, result.elf_magic_found ? 1 : 0, result.file_size);

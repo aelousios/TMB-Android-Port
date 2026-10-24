@@ -5,6 +5,7 @@ add_library(tmb_native SHARED
     native-lib.cpp
     iso9660.cpp
     ps2_elf.cpp
+    ps2_memory.cpp
 )
 
 target_compile_features(tmb_native PRIVATE cxx_std_17)

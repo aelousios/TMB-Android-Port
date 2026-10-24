@@ -12,4 +12,10 @@ g++ -std=c++17 -Wall -Wextra -Werror \
   -Iapp/src/main/cpp \
   tests/ps2_elf_test.cpp app/src/main/cpp/ps2_elf.cpp \
   -o "$elfout"
+memout="${TMPDIR:-/tmp}/tmb_ps2_memory_test"
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -Iapp/src/main/cpp \
+  tests/ps2_memory_test.cpp app/src/main/cpp/ps2_memory.cpp app/src/main/cpp/ps2_elf.cpp \
+  -o "$memout"
+"$memout"
 "$elfout"

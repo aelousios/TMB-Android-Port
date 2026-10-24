@@ -13,7 +13,8 @@ No game ISO, copyrighted game assets, extracted executable or decompilation sour
 - OpenGL ES 2.0 chase-camera scene with an original placeholder vehicle, obstacle course and moving target.
 - Hold controls for steering, acceleration, reverse/braking, firing and special attack. These controls affect only the placeholder demo.
 - Android document picker to select a local image without copying it into the app.
-- Read-only ISO-9660 inspection for the US NTSC-U executable `SCUS_971.01`, followed by bounded ELF32 little-endian MIPS header and PT_LOAD-segment validation. The app never writes to the image.
+- Read-only ISO-9660 inspection for the US NTSC-U executable `SCUS_971.01`, followed by bounded ELF32 little-endian MIPS header and PT_LOAD-segment validation.
+- Loads validated PT_LOAD bytes into a retained, modeled PS2 EE memory image (32 MiB main RAM, 16 KiB scratchpad), including zero-filled BSS. The ISO itself is never modified.
 - Host-side tests for valid, malformed and wrong-game ISO images, plus valid/malformed/wrong-architecture ELF metadata.
 - GitHub Actions workflow to compile and publish a **debug APK build artifact** when this folder is pushed to a GitHub repository.
 
@@ -47,7 +48,7 @@ Expected output: `iso9660 tests passed`.
 
 ## ISO support note
 
-The current inspector expects a plain ISO-9660 image containing `SCUS_971.01`, as described by the upstream project for the US NTSC-U version (`SCUS-97101`). CHD and BIN/CUE are not parsed by this inspector. A successful check now confirms the executable's ELF32/little-endian/MIPS metadata, program-header table, bounded PT_LOAD segments and entry-point coverage. It is still a metadata-only check: the app does **not** load or execute the MIPS code, initialize PS2 hardware services, or launch the game.
+The current inspector expects a plain ISO-9660 image containing `SCUS_971.01`, as described by the upstream project for the US NTSC-U version (`SCUS-97101`). CHD and BIN/CUE are not parsed by this inspector. A successful check confirms the executable's ELF32/little-endian/MIPS metadata and stages its PT_LOAD segments into a modeled PS2 guest memory image, including BSS zero-fill and common RAM aliases. This is still not game execution: the app does **not** execute MIPS instructions or implement PS2 graphics, vector units, DMA, audio, interrupts, or I/O services.
 
 ## Next engineering milestones
 

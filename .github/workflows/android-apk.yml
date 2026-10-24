@@ -33,9 +33,16 @@ jobs:
             tests/ps2_elf_test.cpp app/src/main/cpp/ps2_elf.cpp \
             -o /tmp/tmb_ps2_elf_test
           /tmp/tmb_ps2_elf_test
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Iapp/src/main/cpp \
+            tests/ps2_memory_test.cpp app/src/main/cpp/ps2_memory.cpp app/src/main/cpp/ps2_elf.cpp \
+            -o /tmp/tmb_ps2_memory_test
+          /tmp/tmb_ps2_memory_test
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
       - name: Install SDK components
         run: |
