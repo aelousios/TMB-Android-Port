@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "TMB-Native-Port-Lab"
 include(":app")
+
+include(":android-host-smoke")
