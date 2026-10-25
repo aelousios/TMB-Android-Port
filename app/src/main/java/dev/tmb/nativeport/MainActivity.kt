@@ -160,6 +160,20 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_ISO || resultCode != RESULT_OK) return
         val uri: Uri = data?.data ?: return
+        // Keep the user-selected disc accessible across app restarts. The Android
+        // document provider may revoke transient grants when the Activity ends.
+        try {
+            val grantFlags = data.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION
+            if (grantFlags != 0) contentResolver.takePersistableUriPermission(uri, grantFlags)
+        } catch (_: SecurityException) {
+            // Some providers do not offer persistable grants; this selection can
+            // still be inspected during this app session.
+        } catch (_: IllegalArgumentException) {
+            // Provider did not issue a persistable document grant.
+        }
+        getSharedPreferences("tmb_port", MODE_PRIVATE).edit()
+            .putString("selected_iso_uri", uri.toString())
+            .apply()
         isoStatus.text = "Checking SCUS_971.01…"
         Thread {
             var result: String

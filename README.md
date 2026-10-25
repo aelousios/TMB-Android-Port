@@ -59,3 +59,9 @@ The current inspector expects a plain ISO-9660 image containing `SCUS_971.01`, a
 5. Only after enough of that runtime exists, replace the placeholder renderer and add a genuine game boot path.
 
 The difficult work is the runtime and hardware compatibility layer, not the ISO picker or the APK packaging.
+
+## Current Android/WebGPU milestone (2026-10-25)
+
+The separate `android-host-smoke` diagnostic was tested on a Pixel 11: WebGPU created an Android native surface and presented 300 frames (`ATTACH_PASS` / `PRESENT_PASS`). The debug APK passed `zipalign -c -P 16 -v 4`, and both native libraries' ELF LOAD segments were verified at 16 KB alignment. See [Android host validation](docs/ANDROID_HOST_VALIDATION.md).
+
+The primary app's ISO document-picker permission is persisted, but the selected ISO is still inspected only. This does not mean the game is bootable; the game-specific generated C++ and Android runner integration are still missing. See [the game boot blocker](docs/ANDROID_GAME_BOOT_BLOCKER.md).
