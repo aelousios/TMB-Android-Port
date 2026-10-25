@@ -5,7 +5,6 @@ import android.app.Activity
 import android.os.Bundle
 import android.view.WindowManager
 import android.webkit.WebView
-import android.webkit.WebViewClient
 
 class MainActivity : Activity() {
     private lateinit var webView: WebView
@@ -23,11 +22,11 @@ class MainActivity : Activity() {
             settings.databaseEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
-            webViewClient = WebViewClient()
+            webViewClient = Ps2WebViewClient(context)
         }
 
         setContentView(webView)
-        webView.loadUrl("file:///android_asset/www/ps2web.html")
+        webView.loadUrl("https://tmb.local/ps2web.html")
     }
 
     override fun onResume() {
