@@ -1,0 +1,5 @@
+/Users/ibrahimalloush/Library/Caches/tmb-ps2-web-recomp/upstream/build/web-tmb/CMakeFiles/ps2runtime.dir
+/Users/ibrahimalloush/Library/Caches/tmb-ps2-web-recomp/upstream/build/web-tmb/CMakeFiles/ps2game.dir
+/Users/ibrahimalloush/Library/Caches/tmb-ps2-web-recomp/upstream/build/web-tmb/CMakeFiles/ps2web.dir
+/Users/ibrahimalloush/Library/Caches/tmb-ps2-web-recomp/upstream/build/web-tmb/CMakeFiles/edit_cache.dir
+/Users/ibrahimalloush/Library/Caches/tmb-ps2-web-recomp/upstream/build/web-tmb/CMakeFiles/rebuild_cache.dir
