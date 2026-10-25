@@ -18,7 +18,11 @@ constexpr std::size_t kSectorSize = 2048;
 constexpr off_t kPvdSector = 16;
 constexpr std::size_t kMaxEntries = 20000;
 constexpr int kMaxDepth = 12;
-constexpr const char* kTargetElf = "SCUS_971.01";
+bool is_tmb_executable(const std::string& name) {
+    return name == "SCUS_971.01" ||  // US original
+           name == "SCUS_971.79" ||  // US Greatest Hits
+           name == "SCES_503.60";    // PAL
+}
 
 std::uint32_t read_le32(const std::uint8_t* p) {
     return static_cast<std::uint32_t>(p[0]) |
@@ -125,7 +129,7 @@ IsoInspection inspect_iso_fd(int fd) {
                         const std::string name = normalize_identifier(record + 33, nameLength);
                         const std::uint32_t lba = read_le32(record + 2);
                         const std::uint32_t bytes = read_le32(record + 10);
-                        if (!is_directory(record) && name == kTargetElf) {
+                        if (!is_directory(record) && is_tmb_executable(name)) {
                             result.target_file_found = true;
                             result.file_lba = lba;
                             result.file_size = bytes;
@@ -138,9 +142,16 @@ IsoInspection inspect_iso_fd(int fd) {
                             result.load_file_bytes = elf.load_file_bytes;
                             result.load_memory_bytes = elf.load_memory_bytes;
                             if (elf.valid) {
-                                result.message = "Found SCUS_971.01. " + elf.message;
+                                if (name == "SCUS_971.01") {
+                                    result.message = "Found US NTSC-U executable " + name + ". " + elf.message;
+                                } else {
+                                    result.message = "Recognized TMB executable " + name + ". " + elf.message +
+                                        " This edition has been recognized for inspection and RAM staging only; "
+                                        "game boot has not been verified.";
+                                }
                             } else {
-                                result.message = "Found SCUS_971.01, but PS2 ELF validation failed: " + elf.message;
+                                result.message = "Found candidate TMB executable " + name +
+                                    ", but PS2 ELF validation failed: " + elf.message;
                             }
                             return result;
                         }
@@ -158,7 +169,8 @@ IsoInspection inspect_iso_fd(int fd) {
     }
 
     result.message = result.valid_iso9660
-        ? "Valid ISO-9660 image, but SCUS_971.01 was not found. This project currently targets the US NTSC-U executable."
+        ? "Valid ISO-9660 image, but no known TMB executable was found. "
+          "Checked SCUS_971.01 (US original), SCUS_971.79 (US Greatest Hits), and SCES_503.60 (PAL)."
         : "This is not a supported ISO image.";
     return result;
 }

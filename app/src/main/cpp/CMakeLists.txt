@@ -12,3 +12,11 @@ target_compile_features(tmb_native PRIVATE cxx_std_17)
 target_include_directories(tmb_native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(tmb_native PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(tmb_native PRIVATE GLESv2 log)
+
+if(ANDROID)
+    target_link_options(tmb_native PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384"
+    )
+endif()
+

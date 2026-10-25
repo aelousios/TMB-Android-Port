@@ -88,6 +88,20 @@ int main() {
     assert(result.elf_entry_address == 0x00100000);
     assert(result.load_segment_count == 2);
 
+    auto pal = validImage();
+    auto* palDir = pal.data() + kSector * 20;
+    std::size_t palOffset = 0;
+    palOffset += palDir[palOffset];
+    palOffset += palDir[palOffset];
+    std::memcpy(palDir + palOffset + 33, "SCES_503.60", 11);
+    fd = fdFrom(pal);
+    result = tmbport::inspect_iso_fd(fd);
+    close(fd);
+    assert(result.valid_iso9660);
+    assert(result.target_file_found);
+    assert(result.ps2_elf_valid);
+    assert(result.message.find("SCES_503.60") != std::string::npos);
+
     auto invalid = validImage();
     invalid[kSector * 16 + 1] = 'X';
     fd = fdFrom(invalid);

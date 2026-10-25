@@ -68,7 +68,7 @@ class MainActivity : Activity() {
             setMargins(dp(12), dp(12), dp(12), dp(12))
         })
 
-        val isoButton = makeButton("SELECT US PS2 ISO", 0)
+        val isoButton = makeButton("SELECT TMB PS2 ISO", 0)
         isoButton.setOnClickListener { openIsoPicker() }
         root.addView(isoButton, FrameLayout.LayoutParams(-2, dp(44), Gravity.TOP or Gravity.END).apply {
             setMargins(dp(12), dp(12), dp(12), dp(12))
@@ -174,22 +174,89 @@ class MainActivity : Activity() {
         getSharedPreferences("tmb_port", MODE_PRIVATE).edit()
             .putString("selected_iso_uri", uri.toString())
             .apply()
-        isoStatus.text = "Checking SCUS_971.01…"
+        isoStatus.text = "Copying selected disc into app storage…"
         Thread {
-            var result: String
+            val displayName = uri.lastPathSegment?.substringAfterLast('/') ?: "Selected file"
+            var result = "ISO copied; inspection has not completed yet."
+            var stagedFile: java.io.File? = null
             try {
-                val pfd = contentResolver.openFileDescriptor(uri, "r")
-                if (pfd == null) {
-                    result = "Could not open selected file"
-                } else {
-                    pfd.use { descriptor -> result = NativeBridge.inspectIsoFd(descriptor.fd) }
+                val targetDir = java.io.File(noBackupFilesDir, "tmb")
+                if (!targetDir.exists() && !targetDir.mkdirs()) {
+                    throw java.io.IOException("Could not create private ISO directory")
                 }
+                val targetFile = java.io.File(targetDir, "selected-disc.iso")
+                val tempFile = java.io.File(targetDir, "selected-disc.iso.part")
+                if (tempFile.exists() && !tempFile.delete()) {
+                    throw java.io.IOException("Could not clear previous partial ISO copy")
+                }
+
+                val input = contentResolver.openInputStream(uri)
+                    ?: throw java.io.IOException("Android could not open the selected document")
+                var bytesCopied = 0L
+                input.use { source ->
+                    java.io.FileOutputStream(tempFile).use { output ->
+                        val buffer = ByteArray(1024 * 1024)
+                        while (true) {
+                            val count = source.read(buffer)
+                            if (count < 0) break
+                            if (count == 0) continue
+                            output.write(buffer, 0, count)
+                            bytesCopied += count
+                            if (bytesCopied % (64L * 1024L * 1024L) < buffer.size) {
+                                val copiedMiB = bytesCopied / (1024L * 1024L)
+                                runOnUiThread {
+                                    isoStatus.text = "Copying $displayName…\n${copiedMiB} MiB copied"
+                                }
+                            }
+                        }
+                        output.fd.sync()
+                    }
+                }
+                if (tempFile.length() == 0L) {
+                    tempFile.delete()
+                    throw java.io.IOException("The selected file is empty")
+                }
+
+                // The temp file and destination share one directory. Prefer atomic replacement so
+                // a failed copy never destroys the previously staged disc.
+                try {
+                    java.nio.file.Files.move(
+                        tempFile.toPath(), targetFile.toPath(),
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                    )
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    java.nio.file.Files.move(
+                        tempFile.toPath(), targetFile.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                    )
+                }
+                stagedFile = targetFile
+                android.os.ParcelFileDescriptor.open(
+                    targetFile,
+                    android.os.ParcelFileDescriptor.MODE_READ_ONLY
+                ).use { descriptor ->
+                    result = NativeBridge.inspectIsoFd(descriptor.fd)
+                }
+                getSharedPreferences("tmb_port", MODE_PRIVATE).edit()
+                    .putString("selected_iso_uri", uri.toString())
+                    .putString("staged_iso_path", targetFile.absolutePath)
+                    .putLong("staged_iso_bytes", targetFile.length())
+                    .apply()
+                android.util.Log.i(
+                    "TMBNativePortLab",
+                    "TMB_ISO_STAGED_PRIVATE: path=${targetFile.absolutePath} bytes=${targetFile.length()}"
+                )
             } catch (e: Exception) {
-                result = "ISO inspection failed: ${e.message ?: e.javaClass.simpleName}"
+                result = "ISO staging/inspection failed: ${e.message ?: e.javaClass.simpleName}"
             }
             runOnUiThread {
-                val displayName = uri.lastPathSegment?.substringAfterLast('/') ?: "Selected file"
-                isoStatus.text = "$displayName\n$result"
+                val stagedNote = if (stagedFile != null) {
+                    "\n\nISO copied into app-private storage."
+                } else {
+                    "\n\nNo new ISO copy was completed."
+                }
+                isoStatus.text = "$displayName\n$result$stagedNote\nGame boot is not yet integrated."
             }
         }.start()
     }
