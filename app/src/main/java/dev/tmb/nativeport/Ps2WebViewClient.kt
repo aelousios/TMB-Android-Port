@@ -5,53 +5,28 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FilterInputStream
 import java.io.IOException
+import java.io.InputStream
 
 class Ps2WebViewClient(private val context: Context) : WebViewClient() {
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         val uri = request.url
-        val path = uri.path ?: return super.shouldInterceptRequest(view, request)
-        
-        // Check if the runtime is requesting the disc image
-        if (path.contains("disc.iso") || path.contains("selected-disc.iso") || path.endsWith(".iso")) {
+        // This app uses a private virtual HTTPS origin. Do not map arbitrary external URLs to local assets.
+        if (!uri.host.equals(RUNTIME_HOST, ignoreCase = true)) {
+            return response(403, "Forbidden", "External network requests are disabled")
+        }
+
+        val path = uri.path ?: return response(400, "Bad Request", "Missing URL path")
+        if (isDiscPath(path)) {
             val isoFile = File(context.noBackupFilesDir, "tmb/selected-disc.iso")
-            if (isoFile.exists() && isoFile.length() > 0) {
-                try {
-                    val fileInputStream = FileInputStream(isoFile)
-                    val fileLength = isoFile.length()
-                    val rangeHeader = request.requestHeaders["Range"]
-                    
-                    val headers = mapOf(
-                        "Cross-Origin-Opener-Policy" to "same-origin",
-                        "Cross-Origin-Embedder-Policy" to "require-corp",
-                        "Access-Control-Allow-Origin" to "*",
-                        "Accept-Ranges" to "bytes",
-                        "Content-Length" to fileLength.toString()
-                    )
-
-                    if (rangeHeader != null) {
-                        // Handle HTTP Range requests for efficient disc streaming
-                        val rangeValue = rangeHeader.removePrefix("bytes=").trim()
-                        val parts = rangeValue.split("-")
-                        val start = parts[0].toLongOrNull() ?: 0L
-                        val end = if (parts.size > 1 && parts[1].isNotBlank()) parts[1].toLongOrNull() ?: (fileLength - 1) else (fileLength - 1)
-                        val contentLength = (end - start + 1).coerceAtMost(fileLength - start)
-
-                        fileInputStream.skip(start)
-                        val partialHeaders = headers.toMutableMap()
-                        partialHeaders["Content-Range"] = "bytes $start-$end/$fileLength"
-                        partialHeaders["Content-Length"] = contentLength.toString()
-
-                        return WebResourceResponse("application/octet-stream", "UTF-8", 206, "Partial Content", partialHeaders, fileInputStream)
-                    }
-
-                    return WebResourceResponse("application/octet-stream", "UTF-8", 200, "OK", headers, fileInputStream)
-                } catch (_: Exception) {
-                    // Fallthrough to 404 / default handler if streaming fails
-                }
+            if (!isoFile.isFile || isoFile.length() <= 0L) {
+                return response(404, "Disc ISO Required", "Select a TMB ISO in the app")
             }
+            return serveIso(request, isoFile)
         }
 
         val assetPath = when {
@@ -60,48 +35,133 @@ class Ps2WebViewClient(private val context: Context) : WebViewClient() {
             else -> "www" + path
         }
 
-        try {
+        return try {
             val inputStream = context.assets.open(assetPath)
-            
-            if (assetPath.endsWith(".html")) {
-                var html = inputStream.bufferedReader().use { it.readText() }
-                val polyfill = "<script>if (!window.crossOriginIsolated) { Object.defineProperty(window, 'crossOriginIsolated', { get: () => true }); }</script>"
-                html = html.replaceFirst("<head>", "<head>\n$polyfill")
-                val bytes = html.toByteArray(Charsets.UTF_8)
-                return WebResourceResponse("text/html", "UTF-8", 200, "OK", mapOf(
-                    "Cross-Origin-Opener-Policy" to "same-origin",
-                    "Cross-Origin-Embedder-Policy" to "require-corp",
-                    "Access-Control-Allow-Origin" to "*"
-                ), bytes.inputStream())
+            when {
+                assetPath.endsWith(".html") -> {
+                    var html = inputStream.bufferedReader().use { it.readText() }
+                    val polyfill = "<script>if (!window.crossOriginIsolated) { Object.defineProperty(window, 'crossOriginIsolated', { get: () => true }); }</script>"
+                    html = html.replaceFirst("<head>", "<head>\n$polyfill")
+                    response("text/html", html.toByteArray(Charsets.UTF_8).inputStream())
+                }
+                assetPath.endsWith(".js") -> {
+                    var js = inputStream.bufferedReader().use { it.readText() }
+                    js = js.replace("!crossOriginIsolated", "false")
+                    response("application/javascript", js.toByteArray(Charsets.UTF_8).inputStream())
+                }
+                assetPath.endsWith(".wasm") -> response("application/wasm", inputStream)
+                assetPath.endsWith(".data") -> response("application/octet-stream", inputStream)
+                assetPath.endsWith(".json") -> response("application/json", inputStream)
+                else -> response("application/octet-stream", inputStream)
             }
-
-            if (assetPath.endsWith(".js")) {
-                var js = inputStream.bufferedReader().use { it.readText() }
-                js = js.replace("!crossOriginIsolated", "false")
-                val bytes = js.toByteArray(Charsets.UTF_8)
-                return WebResourceResponse("application/javascript", "UTF-8", 200, "OK", mapOf(
-                    "Cross-Origin-Opener-Policy" to "same-origin",
-                    "Cross-Origin-Embedder-Policy" to "require-corp",
-                    "Access-Control-Allow-Origin" to "*"
-                ), bytes.inputStream())
-            }
-
-            val mimeType = when {
-                assetPath.endsWith(".wasm") -> "application/wasm"
-                assetPath.endsWith(".data") -> "application/octet-stream"
-                assetPath.endsWith(".json") -> "application/json"
-                else -> "application/octet-stream"
-            }
-
-            val headers = mapOf(
-                "Cross-Origin-Opener-Policy" to "same-origin",
-                "Cross-Origin-Embedder-Policy" to "require-corp",
-                "Access-Control-Allow-Origin" to "*"
-            )
-
-            return WebResourceResponse(mimeType, "UTF-8", 200, "OK", headers, inputStream)
-        } catch (e: IOException) {
-            return super.shouldInterceptRequest(view, request)
+        } catch (_: IOException) {
+            response(404, "Not Found", "Runtime asset not found: $assetPath")
         }
+    }
+
+    private fun serveIso(request: WebResourceRequest, file: File): WebResourceResponse {
+        val method = request.method.uppercase()
+        if (method != "GET" && method != "HEAD") {
+            return response(405, "Method Not Allowed", "Only GET and HEAD are supported")
+        }
+
+        val total = file.length()
+        if (total <= 0L) return response(404, "Not Found", "Staged ISO is empty")
+        val range = request.requestHeaders.entries.firstOrNull { it.key.equals("Range", ignoreCase = true) }?.value
+
+        var start = 0L
+        var end = total - 1L
+        var partial = false
+        if (range != null) {
+            val parsed = parseSingleRange(range, total)
+                ?: return WebResourceResponse(
+                    "text/plain", "UTF-8", 416, "Range Not Satisfiable",
+                    baseHeaders() + mapOf("Content-Range" to "bytes */$total", "Content-Length" to "0"),
+                    ByteArrayInputStream(ByteArray(0))
+                )
+            start = parsed.first
+            end = parsed.second
+            partial = true
+        }
+
+        val length = end - start + 1L
+        val headers = baseHeaders() + mapOf(
+            "Accept-Ranges" to "bytes",
+            "Content-Length" to length.toString()
+        ) + if (partial) mapOf("Content-Range" to "bytes $start-$end/$total") else emptyMap()
+
+        val body = if (method == "HEAD") {
+            ByteArrayInputStream(ByteArray(0))
+        } else {
+            val stream = FileInputStream(file)
+            stream.channel.position(start)
+            limitedStream(stream, length)
+        }
+        return WebResourceResponse(
+            "application/octet-stream", "UTF-8", if (partial) 206 else 200,
+            if (partial) "Partial Content" else "OK", headers, body
+        )
+    }
+
+    private fun parseSingleRange(header: String, total: Long): Pair<Long, Long>? {
+        if (!header.startsWith("bytes=") || header.contains(',')) return null
+        val spec = header.removePrefix("bytes=").trim()
+        val separator = spec.indexOf('-')
+        if (separator < 0) return null
+        val left = spec.substring(0, separator).trim()
+        val right = spec.substring(separator + 1).trim()
+        if (left.isEmpty()) {
+            val suffix = right.toLongOrNull() ?: return null
+            if (suffix <= 0L) return null
+            return (total - suffix).coerceAtLeast(0L) to (total - 1L)
+        }
+        val start = left.toLongOrNull() ?: return null
+        if (start < 0L || start >= total) return null
+        val requestedEnd = if (right.isEmpty()) total - 1L else right.toLongOrNull() ?: return null
+        if (requestedEnd < start) return null
+        return start to requestedEnd.coerceAtMost(total - 1L)
+    }
+
+    private fun limitedStream(stream: InputStream, length: Long): InputStream = object : FilterInputStream(stream) {
+        private var remaining = length
+        override fun read(): Int {
+            if (remaining <= 0L) return -1
+            val result = super.read()
+            if (result >= 0) remaining--
+            return result
+        }
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (remaining <= 0L) return -1
+            val allowed = minOf(length.toLong(), remaining).toInt()
+            val count = super.read(buffer, offset, allowed)
+            if (count > 0) remaining -= count.toLong()
+            return count
+        }
+    }
+
+    private fun isDiscPath(path: String): Boolean =
+        path.contains("disc.iso", ignoreCase = true) ||
+            path.contains("selected-disc.iso", ignoreCase = true) ||
+            path.endsWith(".iso", ignoreCase = true)
+
+    private fun response(mime: String, body: InputStream): WebResourceResponse =
+        WebResourceResponse(mime, "UTF-8", 200, "OK", baseHeaders(), body)
+
+    private fun response(status: Int, reason: String, message: String): WebResourceResponse =
+        WebResourceResponse(
+            "text/plain", "UTF-8", status, reason,
+            baseHeaders() + mapOf("Content-Length" to message.toByteArray(Charsets.UTF_8).size.toString()),
+            ByteArrayInputStream(message.toByteArray(Charsets.UTF_8))
+        )
+
+    private fun baseHeaders(): Map<String, String> = mapOf(
+        "Cross-Origin-Opener-Policy" to "same-origin",
+        "Cross-Origin-Embedder-Policy" to "require-corp",
+        "Access-Control-Allow-Origin" to "*",
+        "Cache-Control" to "no-store"
+    )
+
+    private companion object {
+        const val RUNTIME_HOST = "tmb.local"
     }
 }
