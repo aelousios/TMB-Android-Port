@@ -1,6 +1,8 @@
 package dev.tmb.nativeport
 
 import android.content.Context
+import android.util.Log
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -13,14 +15,35 @@ import java.io.IOException
 import java.io.InputStream
 
 class Ps2WebViewClient(private val context: Context) : WebViewClient() {
+    override fun onPageFinished(view: WebView, url: String) {
+        super.onPageFinished(view, url)
+        if (url.startsWith("http://127.0.0.1:")) {
+            val probe = "(function(){var sab='not tested';try{var b=new SharedArrayBuffer(8);sab='ok:'+b.byteLength}catch(e){sab=e.name+':'+e.message};return JSON.stringify({origin:location.origin,crossOriginIsolated:self.crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer,sharedBufferProbe:sab})})()"
+            view.evaluateJavascript(probe) { result ->
+                Log.i("TMB_WEB", "isolation probe=$result")
+            }
+        }
+    }
+
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         val uri = request.url
+        // Worker fetches for disc sectors must reach the loopback HTTP server.
+        // The virtual HTTPS interceptor cannot reliably serve Emscripten worker fetches.
+        if (uri.host.equals("127.0.0.1", ignoreCase = true)) return null
         // This app uses a private virtual HTTPS origin. Do not map arbitrary external URLs to local assets.
         if (!uri.host.equals(RUNTIME_HOST, ignoreCase = true)) {
             return response(403, "Forbidden", "External network requests are disabled")
         }
 
         val path = uri.path ?: return response(400, "Bad Request", "Missing URL path")
+        if (path.endsWith(".html", true) || path.endsWith(".js", true) ||
+            path.endsWith(".wasm", true) || path.endsWith(".data", true) || isDiscPath(path)) {
+            Log.i(
+                "TMB_WEB",
+                "request=${request.method} path=$path " +
+                    "range=${request.requestHeaders.entries.firstOrNull { it.key.equals("Range", true) }?.value ?: "-"}"
+            )
+        }
         if (isDiscPath(path)) {
             val isoFile = File(context.noBackupFilesDir, "tmb/selected-disc.iso")
             if (!isoFile.isFile || isoFile.length() <= 0L) {
@@ -37,16 +60,14 @@ class Ps2WebViewClient(private val context: Context) : WebViewClient() {
 
         return try {
             val inputStream = context.assets.open(assetPath)
+            Log.i("TMB_WEB", "asset OK=$assetPath")
             when {
                 assetPath.endsWith(".html") -> {
                     var html = inputStream.bufferedReader().use { it.readText() }
-                    val polyfill = "<script>if (!window.crossOriginIsolated) { Object.defineProperty(window, 'crossOriginIsolated', { get: () => true }); }</script>"
-                    html = html.replaceFirst("<head>", "<head>\n$polyfill")
-                    response("text/html", html.toByteArray(Charsets.UTF_8).inputStream())
+response("text/html", html.toByteArray(Charsets.UTF_8).inputStream())
                 }
                 assetPath.endsWith(".js") -> {
                     var js = inputStream.bufferedReader().use { it.readText() }
-                    js = js.replace("!crossOriginIsolated", "false")
                     response("application/javascript", js.toByteArray(Charsets.UTF_8).inputStream())
                 }
                 assetPath.endsWith(".wasm") -> response("application/wasm", inputStream)
@@ -55,11 +76,41 @@ class Ps2WebViewClient(private val context: Context) : WebViewClient() {
                 else -> response("application/octet-stream", inputStream)
             }
         } catch (_: IOException) {
+            Log.e("TMB_WEB", "missing asset=$assetPath")
             response(404, "Not Found", "Runtime asset not found: $assetPath")
         }
     }
 
+    override fun onReceivedError(
+        view: WebView,
+        request: WebResourceRequest,
+        error: WebResourceError
+    ) {
+        Log.e(
+            "TMB_WEB",
+            "RESOURCE_ERROR url=${request.url} code=${error.errorCode} description=${error.description}"
+        )
+        super.onReceivedError(view, request, error)
+    }
+
+    override fun onReceivedHttpError(
+        view: WebView,
+        request: WebResourceRequest,
+        errorResponse: WebResourceResponse
+    ) {
+        Log.e(
+            "TMB_WEB",
+            "HTTP_ERROR status=${errorResponse.statusCode} url=${request.url}"
+        )
+        super.onReceivedHttpError(view, request, errorResponse)
+    }
+
     private fun serveIso(request: WebResourceRequest, file: File): WebResourceResponse {
+        Log.i(
+            "TMB_WEB",
+            "ISO length=${file.length()} method=${request.method} " +
+                "range=${request.requestHeaders.entries.firstOrNull { it.key.equals("Range", true) }?.value ?: "-"}"
+        )
         val method = request.method.uppercase()
         if (method != "GET" && method != "HEAD") {
             return response(405, "Method Not Allowed", "Only GET and HEAD are supported")
@@ -155,6 +206,7 @@ class Ps2WebViewClient(private val context: Context) : WebViewClient() {
         )
 
     private fun baseHeaders(): Map<String, String> = mapOf(
+        "Document-Isolation-Policy" to "isolate-and-credentialless",
         "Cross-Origin-Opener-Policy" to "same-origin",
         "Cross-Origin-Embedder-Policy" to "require-corp",
         "Access-Control-Allow-Origin" to "*",

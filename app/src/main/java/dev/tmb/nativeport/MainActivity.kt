@@ -1,5 +1,8 @@
 package dev.tmb.nativeport
 
+
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
@@ -7,6 +10,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.WindowManager
+import android.util.Log
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.Button
 import android.widget.FrameLayout
@@ -18,6 +24,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 class MainActivity : Activity() {
+    private lateinit var runtimeServer: RuntimeHttpServer
     private lateinit var webView: WebView
     private lateinit var isoButton: Button
     private val stagedIso: File
@@ -27,6 +34,10 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // Serve worker-originated ISO range requests over loopback TCP.
+        runtimeServer = RuntimeHttpServer(applicationContext)
+        runtimeServer.start()
 
         val root = FrameLayout(this)
         webView = WebView(this).apply {
@@ -38,6 +49,16 @@ class MainActivity : Activity() {
             settings.mediaPlaybackRequiresUserGesture = false
             setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
             webViewClient = Ps2WebViewClient(context)
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                    Log.e(
+                        "TMB_WEB",
+                        "JS ${message.messageLevel()}: ${message.message()} " +
+                            "at ${message.sourceId()}:${message.lineNumber()}"
+                    )
+                    return true
+                }
+            }
         }
         root.addView(webView, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -60,7 +81,27 @@ class MainActivity : Activity() {
 
         setContentView(root)
         // The bundled runtime requests this path. Ps2WebViewClient maps it to the staged private ISO.
-        webView.loadUrl("https://tmb.local/ps2web.html?disc=disc.iso")
+        // Permit SharedArrayBuffer only for the app-owned runtime origin.
+        val hasMultiProfile = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+        val hasIsolationAllowlist = WebViewFeature.isFeatureSupported(
+            WebViewFeature.CROSS_ORIGIN_ISOLATED_ALLOWLIST
+        )
+        if (hasMultiProfile && hasIsolationAllowlist) {
+            try {
+                WebViewCompat.getProfile(webView)
+                    .setCrossOriginIsolatedAllowlist(setOf(runtimeServer.origin))
+                Log.i("TMB_WEB", "Cross-origin isolated APIs allowlisted for ${runtimeServer.origin}")
+            } catch (error: Exception) {
+                Log.e("TMB_WEB", "Failed to configure SharedArrayBuffer permission", error)
+            }
+        } else {
+            Log.e(
+                "TMB_WEB",
+                "WebView feature unavailable: MULTI_PROFILE=$hasMultiProfile, " +
+                    "CROSS_ORIGIN_ISOLATED_ALLOWLIST=$hasIsolationAllowlist"
+            )
+        }
+        webView.loadUrl("${runtimeServer.origin}/ps2web.html?disc=disc.iso")
     }
 
     private fun openIsoPicker() {
@@ -175,6 +216,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         if (::webView.isInitialized) webView.destroy()
+        if (::runtimeServer.isInitialized) runtimeServer.close()
+
         super.onDestroy()
     }
 

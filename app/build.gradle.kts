@@ -47,3 +47,7 @@ android {
         jvmTarget = "17"
     }
 }
+
+dependencies {
+    implementation("androidx.webkit:webkit:1.18.0")
+}

@@ -5,7 +5,8 @@
         android:allowBackup="false"
         android:label="Twisted Metal: Black Native Port Lab"
         android:theme="@android:style/Theme.Material.NoActionBar"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/tmb_network_security_config">
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
